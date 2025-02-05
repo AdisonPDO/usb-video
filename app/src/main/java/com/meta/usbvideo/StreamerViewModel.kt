@@ -27,6 +27,9 @@ import android.graphics.SurfaceTexture
 import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
+import android.media.MediaRecorder
+import android.os.Build
+import android.os.Environment
 import android.util.Log
 import android.view.Surface
 import androidx.activity.ComponentActivity
@@ -64,6 +67,10 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.stateIn
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 sealed interface UiAction
 
@@ -93,17 +100,43 @@ class StreamerViewModel(
 
   var videoFormat: VideoFormat? = null
   var videoFormats: List<VideoFormat> = emptyList()
-
+  private var mediaRecorder: MediaRecorder? = null
+  private var recordingFile: File? = null
   fun setVideoFormatAt(index: Int) {
     videoFormat = videoFormats.get(index)
   }
 
   fun stopStreaming() {
-    (UsbMonitor.usbDeviceState as? UsbDeviceState.Streaming)?.let {
+    (UsbMonitor.usbDeviceState as? UsbDeviceState.Streaming)?.let { state ->
+      try {
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val storageDir = application.getExternalFilesDir(Environment.DIRECTORY_MOVIES)
+        recordingFile = File(storageDir, "USB_VIDEO_$timestamp.mp4")
+
+        mediaRecorder = MediaRecorder(application).apply {
+          setVideoSource(MediaRecorder.VideoSource.SURFACE)
+          setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+          setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+          setVideoSize(1920, 1080)
+          setVideoFrameRate(30)
+          setOutputFile(recordingFile?.absolutePath)
+          prepare()
+          start()
+          // Attendons un peu avant d'arrêter
+          Thread.sleep(1000)
+          stop()
+        }
+      } catch (e: Exception) {
+        Log.e(TAG, "Error recording stream", e)
+      } finally {
+        mediaRecorder?.release()
+        mediaRecorder = null
+      }
+
       setState(UsbDeviceState.StreamingStop(
-        it.usbDevice,
-        it.audioStreamingConnection,
-        it.videoStreamingConnection,
+        state.usbDevice,
+        state.audioStreamingConnection,
+        state.videoStreamingConnection
       ))
     }
   }
